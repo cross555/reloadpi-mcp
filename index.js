@@ -22,17 +22,14 @@ import { randomUUID } from "crypto";
 const API_BASE = process.env.RELOADPI_API_BASE ?? "https://api.reloadpi.com/api/catalog";
 const PORT     = process.env.PORT ?? 3100;
 
-// Plain axios for free tools — no wallet needed
-const freeClient = axios.create({ baseURL: API_BASE });
+if (!process.env.EVM_PRIVATE_KEY) {
+  console.error("❌ EVM_PRIVATE_KEY is required — agent must provide a funded USDC wallet on Base");
+  process.exit(1);
+}
 
-// x402 client — only built when EVM_PRIVATE_KEY is present
-function buildPaymentClient() {
-  if (!process.env.EVM_PRIVATE_KEY) {
-    throw new Error(
-      "EVM_PRIVATE_KEY is required for purchases. " +
-      "See https://github.com/cross555/reloadpi-mcp for self-hosting setup."
-    );
-  }
+// ── x402 axios client ─────────────────────────────────────────────────────────
+
+function buildHttpClient() {
   const signer = privateKeyToAccount(process.env.EVM_PRIVATE_KEY);
   const x402   = new x402Client();
   x402.register("eip155:*", new ExactEvmScheme(signer));
@@ -53,7 +50,7 @@ function createMcpServer() {
 
   server.tool(
     "browse_voucher_offers",
-    "Search gift cards and vouchers from 5000+ brands across 150+ countries (Amazon, Google Play, Netflix, Steam, Visa and more). Filter by brand, country or category. Call this before purchasing to discover available offer IDs and prices. Free — no payment required.",
+    "Search gift cards and vouchers from 5000+ brands across 150+ countries (Amazon, Google Play, Netflix, Steam, Visa and more). Filter by brand, country or category. Call this before purchasing to discover available offer IDs and prices.",
     {
       brand:    z.string().optional().describe("Brand name filter e.g. Amazon"),
       country:  z.string().optional().describe("ISO country code e.g. US"),
@@ -62,7 +59,8 @@ function createMcpServer() {
       offset:   z.number().optional().default(0).describe("Pagination offset"),
     },
     async ({ brand, country, category, limit, offset }) => {
-      const res = await freeClient.get("/vouchers/offers", {
+      const api = buildHttpClient();
+      const res = await api.get("/vouchers/offers", {
         params: { brand, country, category, limit, offset },
       });
       return { content: [{ type: "text", text: JSON.stringify(res.data) }] };
@@ -71,29 +69,31 @@ function createMcpServer() {
 
   server.tool(
     "get_voucher_offer",
-    "Get full details for a specific voucher or gift card offer by ID — including exact price, denomination, currency, priceType (FIXED or RANGE), and requiredFields for the recipient. Free — no payment required.",
+    "Get full details for a specific voucher or gift card offer by ID — including exact price, denomination, currency, priceType (FIXED or RANGE), and requiredFields for the recipient. Call this before purchasing to confirm the exact payment amount.",
     {
       offerId: z.string().describe("Voucher offer ID e.g. 1-800-BASKETS_US_002_EGIFT"),
     },
     async ({ offerId }) => {
-      const res = await freeClient.get(`/vouchers/offers/${offerId}`);
+      const api = buildHttpClient();
+      const res = await api.get(`/vouchers/offers/${offerId}`);
       return { content: [{ type: "text", text: JSON.stringify(res.data) }] };
     }
   );
 
   server.tool(
     "get_voucher_filters",
-    "Get all valid filter values for the voucher catalog — available brand names, ISO country codes, and category slugs. Use before calling browse_voucher_offers to know what filter values are accepted. Free — no payment required.",
+    "Get all valid filter values for the voucher catalog — available brand names, ISO country codes, and category slugs. Use before calling browse_voucher_offers to know what filter values are accepted.",
     {},
     async () => {
-      const res = await freeClient.get("/vouchers/filters");
+      const api = buildHttpClient();
+      const res = await api.get("/vouchers/filters");
       return { content: [{ type: "text", text: JSON.stringify(res.data) }] };
     }
   );
 
   server.tool(
     "purchase_voucher",
-    "Purchase a gift card or voucher. The x402 payment (USDC on Base) is handled automatically from the agent's wallet. Provide offerId from browse_voucher_offers. For RANGE priceType (open-value cards like Amazon), also supply value in USD. Returns orderId, txHash, and delivery (pinCode / redeemUrl) when available. Requires EVM_PRIVATE_KEY — self-host to use purchases.",
+    "Purchase a gift card or voucher. The x402 payment (USDC on Base) is handled automatically from the agent's wallet. Provide offerId from browse_voucher_offers. For RANGE priceType (open-value cards like Amazon), also supply value in USD. Returns orderId, txHash, and delivery (pinCode / redeemUrl) when available.",
     {
       offerId:   z.string().describe("Voucher offer ID from browse_voucher_offers"),
       firstName: z.string().describe("Recipient first name"),
@@ -103,7 +103,7 @@ function createMcpServer() {
       value:     z.number().optional().describe("USD amount — RANGE priceType only (open-value cards). Omit for FIXED."),
     },
     async ({ offerId, firstName, lastName, email, country, value }) => {
-      const api = buildPaymentClient();
+      const api = buildHttpClient();
       const body = {
         offerId,
         recipient: { firstName, lastName, ...(email && { email }), ...(country && { country }) },
@@ -120,7 +120,7 @@ function createMcpServer() {
 
   server.tool(
     "browse_topup_offers",
-    "Search prepaid mobile airtime and data top-up offers across 500+ operators in 150+ countries — including MTN, Airtel, Orange, Movistar, Digicel and more. Filter by country or operator. Free — no payment required.",
+    "Search prepaid mobile airtime and data top-up offers across 500+ operators in 150+ countries — including MTN, Airtel, Orange, Movistar, Digicel and more. Filter by country or operator. Call this before purchasing to discover available offer IDs and prices.",
     {
       country:  z.string().optional().describe("ISO country code e.g. GH, ES, NG"),
       operator: z.string().optional().describe("Operator name filter e.g. MTN, Airtel"),
@@ -128,8 +128,9 @@ function createMcpServer() {
       offset:   z.number().optional().default(0),
     },
     async ({ country, operator, limit, offset }) => {
-      const res = await freeClient.get("/topups/offers", {
-        params: { country, operator, limit, offset },
+      const api = buildHttpClient();
+      const res = await api.get("/topups/offers", {
+        params: { country, operator, limit },
       });
       return { content: [{ type: "text", text: JSON.stringify(res.data) }] };
     }
@@ -137,25 +138,26 @@ function createMcpServer() {
 
   server.tool(
     "get_topup_offer",
-    "Get full details for a specific mobile top-up offer by ID — including price, operator, country, and required recipient fields. Free — no payment required.",
+    "Get full details for a specific mobile top-up offer by ID — including price, operator, country, and required recipient fields.",
     {
       offerId: z.string().describe("Topup offer ID e.g. AIRTELTIGO_GH_025"),
     },
     async ({ offerId }) => {
-      const res = await freeClient.get(`/topups/offers/${offerId}`);
+      const api = buildHttpClient();
+      const res = await api.get(`/topups/offers/${offerId}`);
       return { content: [{ type: "text", text: JSON.stringify(res.data) }] };
     }
   );
 
   server.tool(
     "purchase_topup",
-    "Purchase a prepaid mobile airtime or data top-up. The x402 payment (USDC on Base) is handled automatically from the agent's wallet. Provide offerId from browse_topup_offers and the recipient phone number in E.164 format. Top-up is delivered directly to the recipient's SIM. Returns orderId and txHash — poll get_order for delivery confirmation. Requires EVM_PRIVATE_KEY — self-host to use purchases.",
+    "Purchase a prepaid mobile airtime or data top-up. The x402 payment (USDC on Base) is handled automatically from the agent's wallet. Provide offerId from browse_topup_offers and the recipient phone number in E.164 format. Top-up is delivered directly to the recipient's SIM. Returns orderId and txHash — poll get_order for delivery confirmation.",
     {
       offerId: z.string().describe("Topup offer ID from browse_topup_offers"),
       msisdn:  z.string().describe("Recipient phone number in E.164 format e.g. +233201234567"),
     },
     async ({ offerId, msisdn }) => {
-      const api = buildPaymentClient();
+      const api = buildHttpClient();
       const res = await api.post("/topups/purchase", {
         offerId,
         recipient: { msisdn },
@@ -170,7 +172,7 @@ function createMcpServer() {
 
   server.tool(
     "browse_esim_offers",
-    "Browse eSIM data plans across 190+ countries and regions — including unlimited data plans, regional multi-country plans, and global roaming. Filter by country, region, duration or data amount. Free — no payment required.",
+    "Browse eSIM data plans across 190+ countries and regions — including unlimited data plans, regional multi-country plans, and global roaming. Filter by country, region, duration or data amount. Call this before purchasing to discover available offer IDs and prices.",
     {
       country:  z.string().optional().describe("ISO country code e.g. ES, US, JP"),
       region:   z.string().optional().describe("Region slug e.g. europe, latam, global"),
@@ -179,7 +181,8 @@ function createMcpServer() {
       offset:   z.number().optional().default(0),
     },
     async ({ country, region, duration, limit, offset }) => {
-      const res = await freeClient.get("/esims/offers", {
+      const api = buildHttpClient();
+      const res = await api.get("/esims/offers", {
         params: { country, region, duration, limit, offset },
       });
       return { content: [{ type: "text", text: JSON.stringify(res.data) }] };
@@ -188,25 +191,26 @@ function createMcpServer() {
 
   server.tool(
     "get_esim_offer",
-    "Get full details for a specific eSIM plan by ID — including exact price, data allowance, duration, coverage countries, and whether data is unlimited. Free — no payment required.",
+    "Get full details for a specific eSIM plan by ID — including exact price, data allowance, duration, coverage countries, and whether data is unlimited.",
     {
       offerId: z.string().describe("eSIM offer ID e.g. ESIM-ES-7D-10GB-NOROAM"),
     },
     async ({ offerId }) => {
-      const res = await freeClient.get(`/esims/offers/${offerId}`);
+      const api = buildHttpClient();
+      const res = await api.get(`/esims/offers/${offerId}`);
       return { content: [{ type: "text", text: JSON.stringify(res.data) }] };
     }
   );
 
   server.tool(
     "purchase_esim",
-    "Purchase an eSIM data plan. The x402 payment (USDC on Base) is handled automatically from the agent's wallet. Provide offerId from browse_esim_offers. Returns orderId, txHash, ICCID and QR code (base64 PNG) when ready. If QR is not immediately available, poll get_order with the returned orderId. Requires EVM_PRIVATE_KEY — self-host to use purchases.",
+    "Purchase an eSIM data plan. The x402 payment (USDC on Base) is handled automatically from the agent's wallet. Provide offerId from browse_esim_offers. Returns orderId, txHash, ICCID and QR code (base64 PNG) when ready. If QR is not immediately available, poll get_order with the returned orderId.",
     {
       offerId: z.string().describe("eSIM offer ID from browse_esim_offers"),
       iccid:   z.string().optional().describe("Existing ICCID — only for top-up/recharge of an installed eSIM"),
     },
     async ({ offerId, iccid }) => {
-      const api = buildPaymentClient();
+      const api = buildHttpClient();
       const res = await api.post("/esims/purchase", {
         offerId,
         ...(iccid && { iccid }),
@@ -226,7 +230,7 @@ function createMcpServer() {
       orderId: z.string().describe("Order UUID returned from any purchase tool"),
     },
     async ({ orderId }) => {
-      const res = await freeClient.get(`/orders/${orderId}`);
+      const res = await axios.get(`${API_BASE}/orders/${orderId}`);
       return { content: [{ type: "text", text: JSON.stringify(res.data) }] };
     }
   );
@@ -238,7 +242,7 @@ function createMcpServer() {
       txHash: z.string().describe("On-chain transaction hash from the purchase settlement e.g. 0xdeaed4..."),
     },
     async ({ txHash }) => {
-      const res = await freeClient.get(`/orders`, { params: { txHash } });
+      const res = await axios.get(`${API_BASE}/orders`, { params: { txHash } });
       return { content: [{ type: "text", text: JSON.stringify(res.data) }] };
     }
   );
@@ -252,8 +256,8 @@ function createMcpServer() {
       idempotencyKey: z.string().describe("Unique UUID for this refund request — prevents double submission"),
     },
     async ({ orderId, txHash, idempotencyKey }) => {
-      const res = await freeClient.post(
-        `/orders/${orderId}/refund`,
+      const res = await axios.post(
+        `${API_BASE}/orders/${orderId}/refund`,
         { txHash },
         { headers: { "Idempotency-Key": idempotencyKey } }
       );
@@ -336,9 +340,4 @@ app.listen(PORT, () => {
   console.log(`🚀 Reloadpi MCP server listening on port ${PORT}`);
   console.log(`   MCP endpoint: http://localhost:${PORT}/mcp`);
   console.log(`   Production:   https://mcp.reloadpi.com/mcp`);
-  if (!process.env.EVM_PRIVATE_KEY) {
-    console.warn("⚠️  EVM_PRIVATE_KEY not set — browse and polling tools work, purchase tools will return an error");
-  } else {
-    console.log("✅ EVM_PRIVATE_KEY set — all tools including purchases are active");
-  }
 });
