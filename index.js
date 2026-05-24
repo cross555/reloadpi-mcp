@@ -208,17 +208,20 @@ function createMcpServer() {
       limit:    z.number().optional().default(10),
       offset:   z.number().optional().default(0),
     },
-    async ({ country, region, duration, limit, offset }) => {
-      try {
-        const api = buildHttpClient();
-        const res = await api.get("/esims/offers", {
-          params: { country, regions: region, duration, limit, offset },
-        });
-        return { content: [{ type: "text", text: JSON.stringify(res.data) }] };
-      } catch (err) {
-        return { isError: true, content: [{ type: "text", text: err.message }] };
-      }
-    }
+ async ({ country, region, duration, limit, offset }) => {
+  try {
+    const api = buildHttpClient();
+    const res = await api.get("/esims/offers", {
+      params: { country, regions: region, duration, limit, offset },
+    });
+    console.log("[browse_esim_offers] status:", res.status);
+    console.log("[browse_esim_offers] data:", JSON.stringify(res.data).slice(0, 500));
+    return { content: [{ type: "text", text: JSON.stringify(res.data) }] };
+  } catch (err) {
+    console.error("[browse_esim_offers] ERROR:", err.message);
+    return { isError: true, content: [{ type: "text", text: err.message }] };
+  }
+}
   );
 
   server.tool(
