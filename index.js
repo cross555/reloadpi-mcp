@@ -59,11 +59,15 @@ function createMcpServer() {
       offset:   z.number().optional().default(0).describe("Pagination offset"),
     },
     async ({ brand, country, category, limit, offset }) => {
-      const api = buildHttpClient();
-      const res = await api.get("/vouchers/offers", {
-        params: { brand, country, category, limit, offset },
-      });
-      return { content: [{ type: "text", text: JSON.stringify(res.data) }] };
+      try {
+        const api = buildHttpClient();
+        const res = await api.get("/vouchers/offers", {
+          params: { brand, country, category, limit, offset },
+        });
+        return { content: [{ type: "text", text: JSON.stringify(res.data) }] };
+      } catch (err) {
+        return { isError: true, content: [{ type: "text", text: err.message }] };
+      }
     }
   );
 
@@ -74,9 +78,13 @@ function createMcpServer() {
       offerId: z.string().describe("Voucher offer ID e.g. 1-800-BASKETS_US_002_EGIFT"),
     },
     async ({ offerId }) => {
-      const api = buildHttpClient();
-      const res = await api.get(`/vouchers/offers/${offerId}`);
-      return { content: [{ type: "text", text: JSON.stringify(res.data) }] };
+      try {
+        const api = buildHttpClient();
+        const res = await api.get(`/vouchers/offers/${offerId}`);
+        return { content: [{ type: "text", text: JSON.stringify(res.data) }] };
+      } catch (err) {
+        return { isError: true, content: [{ type: "text", text: err.message }] };
+      }
     }
   );
 
@@ -85,9 +93,13 @@ function createMcpServer() {
     "Get all valid filter values for the voucher catalog — available brand names, ISO country codes, and category slugs. Use before calling browse_voucher_offers to know what filter values are accepted.",
     {},
     async () => {
-      const api = buildHttpClient();
-      const res = await api.get("/vouchers/filters");
-      return { content: [{ type: "text", text: JSON.stringify(res.data) }] };
+      try {
+        const api = buildHttpClient();
+        const res = await api.get("/vouchers/filters");
+        return { content: [{ type: "text", text: JSON.stringify(res.data) }] };
+      } catch (err) {
+        return { isError: true, content: [{ type: "text", text: err.message }] };
+      }
     }
   );
 
@@ -103,14 +115,18 @@ function createMcpServer() {
       value:     z.number().optional().describe("USD amount — RANGE priceType only (open-value cards). Omit for FIXED."),
     },
     async ({ offerId, firstName, lastName, email, country, value }) => {
-      const api = buildHttpClient();
-      const body = {
-        offerId,
-        recipient: { firstName, lastName, ...(email && { email }), ...(country && { country }) },
-        ...(value !== undefined && { value }),
-      };
-      const res = await api.post("/vouchers/purchase", body);
-      return { content: [{ type: "text", text: JSON.stringify(res.data) }] };
+      try {
+        const api = buildHttpClient();
+        const body = {
+          offerId,
+          recipient: { firstName, lastName, ...(email && { email }), ...(country && { country }) },
+          ...(value !== undefined && { value }),
+        };
+        const res = await api.post("/vouchers/purchase", body);
+        return { content: [{ type: "text", text: JSON.stringify(res.data) }] };
+      } catch (err) {
+        return { isError: true, content: [{ type: "text", text: err.message }] };
+      }
     }
   );
 
@@ -128,11 +144,15 @@ function createMcpServer() {
       offset:   z.number().optional().default(0),
     },
     async ({ country, operator, limit, offset }) => {
-      const api = buildHttpClient();
-      const res = await api.get("/topups/offers", {
-        params: { country, operator, limit },
-      });
-      return { content: [{ type: "text", text: JSON.stringify(res.data) }] };
+      try {
+        const api = buildHttpClient();
+        const res = await api.get("/topups/offers", {
+          params: { country, operator, limit },
+        });
+        return { content: [{ type: "text", text: JSON.stringify(res.data) }] };
+      } catch (err) {
+        return { isError: true, content: [{ type: "text", text: err.message }] };
+      }
     }
   );
 
@@ -143,9 +163,13 @@ function createMcpServer() {
       offerId: z.string().describe("Topup offer ID e.g. AIRTELTIGO_GH_025"),
     },
     async ({ offerId }) => {
-      const api = buildHttpClient();
-      const res = await api.get(`/topups/offers/${offerId}`);
-      return { content: [{ type: "text", text: JSON.stringify(res.data) }] };
+      try {
+        const api = buildHttpClient();
+        const res = await api.get(`/topups/offers/${offerId}`);
+        return { content: [{ type: "text", text: JSON.stringify(res.data) }] };
+      } catch (err) {
+        return { isError: true, content: [{ type: "text", text: err.message }] };
+      }
     }
   );
 
@@ -157,12 +181,16 @@ function createMcpServer() {
       msisdn:  z.string().describe("Recipient phone number in E.164 format e.g. +233201234567"),
     },
     async ({ offerId, msisdn }) => {
-      const api = buildHttpClient();
-      const res = await api.post("/topups/purchase", {
-        offerId,
-        recipient: { msisdn },
-      });
-      return { content: [{ type: "text", text: JSON.stringify(res.data) }] };
+      try {
+        const api = buildHttpClient();
+        const res = await api.post("/topups/purchase", {
+          offerId,
+          recipient: { msisdn },
+        });
+        return { content: [{ type: "text", text: JSON.stringify(res.data) }] };
+      } catch (err) {
+        return { isError: true, content: [{ type: "text", text: err.message }] };
+      }
     }
   );
 
@@ -181,11 +209,15 @@ function createMcpServer() {
       offset:   z.number().optional().default(0),
     },
     async ({ country, region, duration, limit, offset }) => {
-      const api = buildHttpClient();
-      const res = await api.get("/esims/offers", {
-        params: { country, region, duration, limit, offset },
-      });
-      return { content: [{ type: "text", text: JSON.stringify(res.data) }] };
+      try {
+        const api = buildHttpClient();
+        const res = await api.get("/esims/offers", {
+          params: { country, regions: region, duration, limit, offset },
+        });
+        return { content: [{ type: "text", text: JSON.stringify(res.data) }] };
+      } catch (err) {
+        return { isError: true, content: [{ type: "text", text: err.message }] };
+      }
     }
   );
 
@@ -196,9 +228,13 @@ function createMcpServer() {
       offerId: z.string().describe("eSIM offer ID e.g. ESIM-ES-7D-10GB-NOROAM"),
     },
     async ({ offerId }) => {
-      const api = buildHttpClient();
-      const res = await api.get(`/esims/offers/${offerId}`);
-      return { content: [{ type: "text", text: JSON.stringify(res.data) }] };
+      try {
+        const api = buildHttpClient();
+        const res = await api.get(`/esims/offers/${offerId}`);
+        return { content: [{ type: "text", text: JSON.stringify(res.data) }] };
+      } catch (err) {
+        return { isError: true, content: [{ type: "text", text: err.message }] };
+      }
     }
   );
 
@@ -210,12 +246,16 @@ function createMcpServer() {
       iccid:   z.string().optional().describe("Existing ICCID — only for top-up/recharge of an installed eSIM"),
     },
     async ({ offerId, iccid }) => {
-      const api = buildHttpClient();
-      const res = await api.post("/esims/purchase", {
-        offerId,
-        ...(iccid && { iccid }),
-      });
-      return { content: [{ type: "text", text: JSON.stringify(res.data) }] };
+      try {
+        const api = buildHttpClient();
+        const res = await api.post("/esims/purchase", {
+          offerId,
+          ...(iccid && { iccid }),
+        });
+        return { content: [{ type: "text", text: JSON.stringify(res.data) }] };
+      } catch (err) {
+        return { isError: true, content: [{ type: "text", text: err.message }] };
+      }
     }
   );
 
