@@ -3,7 +3,7 @@
 MCP server for the [Reloadpi](https://reloadpi.com) digital goods catalog.
 
 Exposes **13 tools** across eSIMs, mobile top-ups, and gift vouchers — all paid automatically
-in USDC on Base via the [x402 protocol](https://x402.org). Agents bring their own funded wallet.
+in USDC on Base via the [x402 protocol](https://x402.org). No account needed. Agents bring their own funded wallet.
 
 **Live endpoint:** `https://mcp.reloadpi.com/mcp`
 
@@ -24,9 +24,9 @@ Browse and order-polling tools are free. Purchase tools trigger an x402 USDC pay
 
 ## Connecting
 
-### Claude Desktop / Claude.ai
+### Browse only (no purchases)
 
-Add to your MCP config:
+Just add the hosted URL — no setup needed:
 
 ```json
 {
@@ -38,29 +38,45 @@ Add to your MCP config:
 }
 ```
 
-The hosted server handles x402 payments server-side. No wallet config needed for browse/polling.
+### With purchases (recommended)
 
-> **Note:** Purchase tools require `EVM_PRIVATE_KEY` — see self-hosting below if you want the agent
-> to pay directly from its own wallet.
+Run a local instance with your own wallet. **Claude or Cursor can set this up for you** — just paste this prompt:
 
----
+> "Clone https://github.com/cross555/reloadpi-mcp, create a .env with my EVM_PRIVATE_KEY, run npm install && npm start, then add it to my MCP config pointing to http://localhost:3100/mcp"
 
-## Self-hosting
+Or manually:
 
 ```bash
 git clone https://github.com/cross555/reloadpi-mcp
 cd reloadpi-mcp
 npm install
-cp .env.example .env   # fill in your key
+cp .env.example .env   # add your EVM_PRIVATE_KEY
 npm start
 ```
 
+Then update your MCP config:
+
+```json
+{
+  "mcpServers": {
+    "reloadpi": {
+      "url": "http://localhost:3100/mcp"
+    }
+  }
+}
+```
+
 ### Environment variables
+
+```env
 EVM_PRIVATE_KEY=0x...   # funded Base wallet — agent pays USDC for purchases
 RELOADPI_API_BASE=https://api.reloadpi.com/api/catalog   # optional override
 PORT=3100                                                  # optional
+```
 
-The wallet needs USDC on Base mainnet. Get Base USDC at [Coinbase](https://coinbase.com) or bridge from another chain.
+You need USDC on Base mainnet. Get it at [Coinbase](https://coinbase.com) or bridge from another chain.
+
+> **No account required.** Your wallet is your identity. Payments settle on-chain directly — Reloadpi never holds your funds.
 
 ---
 
@@ -68,7 +84,7 @@ The wallet needs USDC on Base mainnet. Get Base USDC at [Coinbase](https://coinb
 
 - **Browse / polling tools** — free, no payment
 - **Purchase tools** — x402 micropayment in USDC deducted automatically per call
-- Refunds: eSIM orders refunded on `FULFILLMENT_FAILED`; vouchers non-refundable once delivered
+- Refunds: eSIM orders refunded on `FULFILLMENT_FAILED`; vouchers and topups non-refundable once delivered
 
 ---
 
