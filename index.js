@@ -30,10 +30,19 @@ if (!process.env.EVM_PRIVATE_KEY) {
 // ── x402 axios client ─────────────────────────────────────────────────────────
 
 function buildHttpClient() {
-  const signer = privateKeyToAccount(process.env.EVM_PRIVATE_KEY);
-  const x402   = new x402Client();
-  x402.register("eip155:*", new ExactEvmScheme(signer));
-  return wrapAxiosWithPayment(axios.create({ baseURL: API_BASE }), x402);
+  console.log("[buildHttpClient] EVM_PRIVATE_KEY present:", !!process.env.EVM_PRIVATE_KEY);
+  try {
+    const signer = privateKeyToAccount(process.env.EVM_PRIVATE_KEY);
+    console.log("[buildHttpClient] signer address:", signer.address);
+    const x402 = new x402Client();
+    x402.register("eip155:*", new ExactEvmScheme(signer));
+    const client = wrapAxiosWithPayment(axios.create({ baseURL: API_BASE }), x402);
+    console.log("[buildHttpClient] client built OK");
+    return client;
+  } catch (err) {
+    console.error("[buildHttpClient] FAILED:", err.message);
+    throw err;
+  }
 }
 
 // ── MCP server factory (one per session) ─────────────────────────────────────
