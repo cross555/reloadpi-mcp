@@ -21,7 +21,9 @@ import { randomUUID } from "crypto";
 
 const API_BASE = process.env.RELOADPI_API_BASE ?? "https://api.reloadpi.com/api/catalog";
 const PORT     = process.env.PORT ?? 3100;
-
+process.on('unhandledRejection', (reason) => {
+  console.error('[unhandledRejection]', reason);
+});
 if (!process.env.EVM_PRIVATE_KEY) {
   console.error("❌ EVM_PRIVATE_KEY is required — agent must provide a funded USDC wallet on Base");
   process.exit(1);
@@ -102,16 +104,24 @@ function createMcpServer() {
       country:   z.string().optional().describe("Recipient ISO country code — required for some brands"),
       value:     z.number().optional().describe("USD amount — RANGE priceType only (open-value cards). Omit for FIXED."),
     },
-    async ({ offerId, firstName, lastName, email, country, value }) => {
-      const api = buildHttpClient();
-      const body = {
-        offerId,
-        recipient: { firstName, lastName, ...(email && { email }), ...(country && { country }) },
-        ...(value !== undefined && { value }),
-      };
-      const res = await api.post("/vouchers/purchase", body);
-      return { content: [{ type: "text", text: JSON.stringify(res.data) }] };
-    }
+  async ({ offerId, firstName, lastName, email, country, value }) => {
+  const api = buildHttpClient();
+  const body = {
+    offerId,
+    recipient: { firstName, lastName, ...(email && { email }), ...(country && { country }) },
+    ...(value !== undefined && { value }),
+  };
+  try {
+    const res = await api.post("/vouchers/purchase", body);
+    return { content: [{ type: "text", text: JSON.stringify(res.data) }] };
+  } catch (err) {
+    console.error('[purchase_voucher error]', err?.message);
+    console.error('[purchase_voucher status]', err?.response?.status);
+    console.error('[purchase_voucher data]', JSON.stringify(err?.response?.data));
+    console.error('[purchase_voucher stack]', err?.stack);
+    throw err;
+  }
+}
   );
 
   // ─────────────────────────────────────────────────────────────────────────────
