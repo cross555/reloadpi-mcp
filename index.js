@@ -6,13 +6,14 @@
 // Deploy as a separate service on Render (same account as api.reloadpi.com)
 
 import "dotenv/config";
+import axios from "axios";
 import express from "express";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { isInitializeRequest } from "@modelcontextprotocol/sdk/types.js";
-import axios from "axios";
-import { wrapAxiosWithPayment, x402Client } from "@x402/axios";
-import { ExactEvmScheme } from "@x402/evm/exact/client";
+import { wrapAxiosWithPaymentFromConfig } from "@x402/axios";
+import { ExactEvmScheme } from "@x402/evm";
+import { privateKeyToAccount } from "viem/accounts";
 import { privateKeyToAccount } from "viem/accounts";
 import { z } from "zod";
 import { randomUUID } from "crypto";
@@ -31,11 +32,17 @@ if (!process.env.EVM_PRIVATE_KEY) {
 
 // ── x402 axios client ─────────────────────────────────────────────────────────
 
+
 function buildHttpClient() {
-  const signer = privateKeyToAccount(process.env.EVM_PRIVATE_KEY);
-  const x402   = new x402Client();
-  x402.register("eip155:*", new ExactEvmScheme(signer));
-  return wrapAxiosWithPayment(axios.create({ baseURL: API_BASE }), x402);
+  const account = privateKeyToAccount(process.env.EVM_PRIVATE_KEY);
+  return wrapAxiosWithPaymentFromConfig(axios.create({ baseURL: API_BASE }), {
+    schemes: [
+      {
+        network: "eip155:8453",
+        client: new ExactEvmScheme(account),
+      },
+    ],
+  });
 }
 
 // ── MCP server factory (one per session) ─────────────────────────────────────
