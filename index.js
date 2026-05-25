@@ -14,7 +14,6 @@ import { isInitializeRequest } from "@modelcontextprotocol/sdk/types.js";
 import { wrapAxiosWithPaymentFromConfig } from "@x402/axios";
 import { ExactEvmScheme } from "@x402/evm";
 import { privateKeyToAccount } from "viem/accounts";
-import { privateKeyToAccount } from "viem/accounts";
 import { z } from "zod";
 import { randomUUID } from "crypto";
 
