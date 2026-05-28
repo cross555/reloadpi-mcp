@@ -5,7 +5,7 @@
   "type": "module",
   "main": "index.js",
   "bin": {
-    "reloadpi-mcp": "./bin/cli.js"
+    "reloadpi-mcp": "bin/cli.js"
   },
   "files": [
     "bin/",
@@ -36,7 +36,7 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/cross555/reloadpi-mcp"
+    "url": "git+https://github.com/cross555/reloadpi-mcp.git"
   },
   "homepage": "https://reloadpi.com",
   "dependencies": {
