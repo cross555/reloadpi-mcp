@@ -25,14 +25,17 @@ process.on('unhandledRejection', (reason) => {
   console.error('[unhandledRejection]', reason);
 });
 if (!process.env.EVM_PRIVATE_KEY) {
-  console.error("❌ EVM_PRIVATE_KEY is required — agent must provide a funded USDC wallet on Base");
-  process.exit(1);
+  console.warn("⚠️  EVM_PRIVATE_KEY not set — browse tools work, purchase tools will fail.");
+  console.warn("   Set it in your MCP config env or in a .env file to enable purchases.");
 }
 
 // ── x402 axios client ─────────────────────────────────────────────────────────
 
 
 function buildHttpClient() {
+  if (!process.env.EVM_PRIVATE_KEY) {
+    throw new Error("EVM_PRIVATE_KEY is required for purchase tools. Add it to your MCP config env block.");
+  }
   const account = privateKeyToAccount(process.env.EVM_PRIVATE_KEY);
   return wrapAxiosWithPaymentFromConfig(axios.create({ baseURL: API_BASE }), {
     schemes: [

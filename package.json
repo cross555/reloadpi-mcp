@@ -1,18 +1,49 @@
 {
   "name": "reloadpi-mcp",
   "version": "1.0.0",
-  "description": "Reloadpi MCP server — browse and purchase eSIMs, vouchers, and topups via x402",
+  "description": "Reloadpi MCP server — browse and purchase eSIMs, vouchers, and topups via x402 (USDC on Base)",
   "type": "module",
   "main": "index.js",
+  "bin": {
+    "reloadpi-mcp": "./bin/cli.js"
+  },
+  "files": [
+    "bin/",
+    "index.js",
+    "README.md"
+  ],
   "scripts": {
     "start": "node index.js",
     "dev": "node --watch index.js"
   },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "keywords": [
+    "mcp",
+    "esim",
+    "topup",
+    "voucher",
+    "gift-card",
+    "x402",
+    "usdc",
+    "base",
+    "reloadpi",
+    "agentic",
+    "claude"
+  ],
+  "author": "Reloadpi",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/cross555/reloadpi-mcp"
+  },
+  "homepage": "https://reloadpi.com",
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.29.0",
-    "@x402/axios": "2.12.0",
-    "@x402/core": "2.12.0",
-    "@x402/evm": "2.12.0",
+    "@x402/axios": "^2.13.0",
+    "@x402/core": "^2.13.0",
+    "@x402/evm": "^2.13.0",
     "@x402/express": "2.12.0",
     "@x402/extensions": "2.12.0",
     "@x402/fetch": "2.12.0",

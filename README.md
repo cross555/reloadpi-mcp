@@ -38,13 +38,27 @@ Just add the hosted URL — no setup needed:
 }
 ```
 
-### With purchases (recommended)
+### With purchases via npx (recommended)
 
-Run a local instance with your own wallet. **Claude or Cursor can set this up for you** — just paste this prompt:
+No cloning needed. Add to your MCP config and set your wallet key:
 
-> "Clone https://github.com/cross555/reloadpi-mcp, create a .env with my EVM_PRIVATE_KEY, run npm install && npm start, then add it to my MCP config pointing to http://localhost:3100/mcp"
+```json
+{
+  "mcpServers": {
+    "reloadpi": {
+      "command": "npx",
+      "args": ["-y", "reloadpi-mcp"],
+      "env": {
+        "EVM_PRIVATE_KEY": "0x..."
+      }
+    }
+  }
+}
+```
 
-Or manually:
+npx downloads and starts the server automatically. Requires Node.js 18+.
+
+### With purchases via git clone
 
 ```bash
 git clone https://github.com/cross555/reloadpi-mcp
