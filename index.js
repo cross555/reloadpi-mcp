@@ -31,7 +31,6 @@ if (!process.env.EVM_PRIVATE_KEY) {
 
 // ── x402 axios client ─────────────────────────────────────────────────────────
 
-
 function buildHttpClient() {
   if (!process.env.EVM_PRIVATE_KEY) {
     throw new Error("EVM_PRIVATE_KEY is required for purchase tools. Add it to your MCP config env block.");
@@ -191,18 +190,23 @@ function createMcpServer() {
 
   server.tool(
     "browse_esim_offers",
-    "Browse eSIM data plans across 190+ countries and regions — including unlimited data plans, regional multi-country plans, and global roaming. Filter by country, region, duration or data amount. Call this before purchasing to discover available offer IDs and prices.",
+    "Browse eSIM data plans across 190+ countries and regions — including unlimited data plans, regional multi-country bundles, and global roaming. Filter by single country (e.g. ES) or by a multi-country region. Set regional:true to list ONLY multi-country regional bundles (e.g. ESIM-N-AMERICA-10D-UNLIMITED covering US+CA+MX); these have no single country code. Call this before purchasing to discover available offer IDs and prices.",
     {
-      country:  z.string().optional().describe("ISO country code e.g. ES, US, JP"),
-      region:   z.string().optional().describe("Region slug e.g. europe, latam, global"),
-      duration: z.number().optional().describe("Plan duration in days e.g. 7, 30"),
-      limit:    z.number().optional().default(10),
-      offset:   z.number().optional().default(0),
+      country: z.string().optional().describe("ISO country code for single-country plans, e.g. ES, US, JP. Omit when using regional/regions."),
+      regions: z.enum([
+        "Global", "Africa", "Asia", "Caribbean", "Central America",
+        "Eastern Europe", "Western Europe", "North America", "Oceania",
+        "South America", "South Asia", "Southeast Asia",
+        "Middle East and North Africa",
+      ]).optional().describe("Multi-country region to filter by (exact Zendit enum value)."),
+      regional: z.boolean().optional().describe("true → return ONLY multi-country regional bundles (country is empty). Combine with `regions` to scope to one region."),
+      limit:   z.number().optional().default(10),
+      offset:  z.number().optional().default(0),
     },
-    async ({ country, region, duration, limit, offset }) => {
+    async ({ country, regions, regional, limit, offset }) => {
       const api = buildHttpClient();
       const res = await api.get("/esims/offers", {
-        params: { country, region, duration, limit, offset },
+        params: { country, regions, regional: regional ? "true" : undefined, limit, offset },
       });
       return { content: [{ type: "text", text: JSON.stringify(res.data) }] };
     }
