@@ -98,7 +98,7 @@ You need USDC on Base mainnet. Get it at [Coinbase](https://coinbase.com) or bri
 
 - **Browse / polling tools** — free, no payment
 - **Purchase tools** — x402 micropayment in USDC deducted automatically per call
-- Refunds: eSIM orders refunded on `FULFILLMENT_FAILED`; vouchers and topups non-refundable once delivered
+- Refunds: eSIM orders and carrier-rejected topups auto-refund on `FULFILLMENT_FAILED`/`EXPIRED` (auto_on_fail, ~24h window); voucher codes and delivered airtime are non-refundable
 
 ---
 
