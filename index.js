@@ -272,7 +272,7 @@ function createMcpServer() {
 
   server.tool(
     "claim_refund",
-    "Claim a refund for a failed or expired eSIM order. Only eligible when status is FULFILLMENT_FAILED or EXPIRED and refund_policy is auto_on_fail. Requires the txHash from the original purchase response as proof of payment. Topup and voucher orders are non-refundable. Free — no payment required.",
+    "Claim a refund for a failed or expired eSIM order, or a carrier-rejected topup. Only eligible when status is FULFILLMENT_FAILED or EXPIRED and refund_policy is auto_on_fail. Requires the txHash from the original purchase response as proof of payment. Voucher orders and successfully delivered topups are non-refundable. Free — no payment required.",
     {
       orderId:        z.string().describe("Order UUID from the purchase response"),
       txHash:         z.string().describe("On-chain txHash from the purchase response — proves you are the original payer"),
