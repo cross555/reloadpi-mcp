@@ -70,8 +70,11 @@ function createMcpServer() {
     },
     async ({ brand, country, category, limit, offset }) => {
       const api = buildHttpClient();
+      // Backend voucher browse reads _limit/_offset (not limit/offset) and
+      // filters by subType, not a "category" param. Map accordingly — call
+      // get_voucher_filters for valid subType values.
       const res = await api.get("/vouchers/offers", {
-        params: { brand, country, category, limit, offset },
+        params: { brand, country, subType: category, _limit: limit, _offset: offset },
       });
       return { content: [{ type: "text", text: JSON.stringify(res.data) }] };
     }
@@ -147,8 +150,10 @@ function createMcpServer() {
     },
     async ({ country, operator, limit, offset }) => {
       const api = buildHttpClient();
+      // Backend topup browse filters by `brand` (the operator) and paginates
+      // with _limit/_offset. `offset` was previously dropped entirely.
       const res = await api.get("/topups/offers", {
-        params: { country, operator, limit },
+        params: { country, brand: operator, _limit: limit, _offset: offset },
       });
       return { content: [{ type: "text", text: JSON.stringify(res.data) }] };
     }
@@ -206,7 +211,7 @@ function createMcpServer() {
     async ({ country, regions, regional, limit, offset }) => {
       const api = buildHttpClient();
       const res = await api.get("/esims/offers", {
-        params: { country, regions, regional: regional ? "true" : undefined, limit, offset },
+        params: { country, regions, regional: regional ? "true" : undefined, _limit: limit, _offset: offset },
       });
       return { content: [{ type: "text", text: JSON.stringify(res.data) }] };
     }
