@@ -2,10 +2,12 @@
 
 MCP server for the [Reloadpi](https://reloadpi.com) digital goods catalog.
 
-Exposes **13 tools** across eSIMs, mobile top-ups, and gift vouchers — all paid automatically
-in USDC on Base via the [x402 protocol](https://x402.org). No account needed. Agents bring their own funded wallet.
+Exposes tools across eSIMs, mobile top-ups, and gift vouchers. **Browsing and order-polling are
+free.** Purchasing settles in USDC on Base via the [x402 protocol](https://x402.org) from **your
+own wallet** — so purchase tools are only available when you self-host with a key (see below).
+No account needed.
 
-**Live endpoint:** `https://mcp.reloadpi.com/mcp`
+**Live endpoint (browse-only):** `https://mcp.reloadpi.com/mcp`
 
 ---
 
@@ -18,7 +20,13 @@ in USDC on Base via the [x402 protocol](https://x402.org). No account needed. Ag
 | eSIMs    | `browse_esim_offers` `get_esim_offer` `purchase_esim` |
 | Orders   | `get_order` `recover_order_by_txhash` `claim_refund` |
 
-Browse and order-polling tools are free. Purchase tools trigger an x402 USDC payment automatically.
+Browse, filter and order-polling tools are **free** and always available (they use the free `/ai`
+API — no wallet). `get_*_offer` (paid detail) and `purchase_*` appear **only when you self-host
+with `EVM_PRIVATE_KEY`** — they settle x402 payments from your own wallet.
+
+> ⚠️ **Never set `EVM_PRIVATE_KEY` on a public deployment.** The server signs from whatever key it
+> holds, for anyone who connects. Public hosting (like `mcp.reloadpi.com`) must run **without** a
+> key — browse-only. Keys belong only on a machine you control.
 
 ---
 
@@ -47,7 +55,7 @@ No cloning needed. Add to your MCP config and set your wallet key:
   "mcpServers": {
     "reloadpi": {
       "command": "npx",
-      "args": ["-y", "reloadpi-mcp"],
+      "args": ["-y", "reloadpi-mcp", "--stdio"],
       "env": {
         "EVM_PRIVATE_KEY": "0x..."
       }
@@ -83,9 +91,12 @@ Then update your MCP config:
 ### Environment variables
 
 ```env
-EVM_PRIVATE_KEY=0x...   # funded Base wallet — agent pays USDC for purchases
-RELOADPI_API_BASE=https://api.reloadpi.com/api/catalog   # optional override
-PORT=3100                                                  # optional
+EVM_PRIVATE_KEY=0x...   # SELF-HOST ONLY — funded Base wallet; enables purchase tools.
+                        # NEVER set on a public host. Unset = browse-only.
+RELOADPI_API_BASE=https://api.reloadpi.com/api/catalog   # optional — paid routes
+RELOADPI_AI_BASE=https://api.reloadpi.com/ai             # optional — free browse API
+PORT=3100                                                # optional
+MCP_AUTH_TOKEN=                                          # optional — Bearer gate on /mcp
 ```
 
 You need USDC on Base mainnet. Get it at [Coinbase](https://coinbase.com) or bridge from another chain.
