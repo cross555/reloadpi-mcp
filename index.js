@@ -80,7 +80,7 @@ const asText = (data) => ({ content: [{ type: "text", text: JSON.stringify(data)
 function createMcpServer() {
   const server = new McpServer({
     name:    "reloadpi",
-    version: "1.1.4",
+    version: "1.2.0",
   });
 
   // ═══════════════════════════════════════════════════════════════════════════
@@ -138,25 +138,89 @@ function createMcpServer() {
 
   // ── eSIMs (browse) ─────────────────────────────────────────────────────────
 
+  // The catalog tags every offer with exactly ONE region, and that taxonomy
+  // PARTITIONS rather than nests: "Asia" does not contain Thailand or Vietnam
+  // (both "Southeast Asia") or India ("South Asia"). Two disjoint valid sets
+  // follow from that, so each browse mode gets its own enum:
+  //
+  //   REGION_TAGS      — every tag in the catalog; valid for single-country browse.
+  //   REGIONAL_REGIONS — the only tags that have multi-country bundles behind them.
+  //
+  // "South America" (340 plans), "Southeast Asia" (225) and "South Asia" (116)
+  // are deliberately absent from REGIONAL_REGIONS: they have single-country
+  // plans but ZERO regional bundles, so offering them as a regional scope would
+  // advertise a menu option that cannot return anything.
+  //
+  // These are static rather than derived at runtime because an MCP tool's
+  // inputSchema must exist synchronously at registration time — deriving them
+  // from a live fetch would make tool registration depend on the catalog API
+  // being reachable at boot, and would leave the enum empty (an invalid schema)
+  // if that call failed. Re-check both lists whenever Zendit's catalog changes:
+  //   curl -s 'https://api.reloadpi.com/ai/esims?regional=true&limit=200' \
+  //     | jq -r '.items[].regions[]' | sort -u   # → REGIONAL_REGIONS
+  //   curl -s 'https://api.reloadpi.com/ai/esims?limit=200' \
+  //     | jq -r '.items[].regions[]' | sort -u   # → REGION_TAGS
+  const REGION_TAGS = [
+    "Global", "Africa", "Asia", "Caribbean", "Central America",
+    "Eastern Europe", "Western Europe", "North America", "Oceania",
+    "South America", "South Asia", "Southeast Asia",
+    "Middle East and North Africa",
+  ];
+  const REGIONAL_REGIONS = [
+    "Africa", "Asia", "Caribbean", "Central America", "Eastern Europe",
+    "Global", "Middle East and North Africa", "North America", "Oceania",
+    "Western Europe",
+  ];
+
   server.tool(
     "browse_esim_offers",
-    "Browse eSIM data plans across 190+ countries and regions — unlimited plans, regional multi-country bundles, and global roaming. Filter by single country (e.g. ES) or by a multi-country region. Set regional:true to list ONLY multi-country bundles (e.g. ESIM-N-AMERICA-10D-UNLIMITED covering US+CA+MX); these have no single country code. Free — no payment. Returns offer IDs and prices; use them with purchase_esim (requires a self-hosted wallet).",
+    "Browse eSIM data plans across 190+ countries — single-country plans and multi-country regional bundles. " +
+    "CHOOSE THE RIGHT FILTER: `country` (ISO-2, e.g. JP) for one specific country; " +
+    "`regions` to browse SINGLE-COUNTRY plans grouped by area; " +
+    "`regional_region` to get MULTI-COUNTRY regional bundles covering an area (this already implies regional-only — do not also set `regional`); " +
+    "`regional:true` on its own to list every regional bundle. " +
+    "IMPORTANT — the region taxonomy PARTITIONS and does NOT nest: \"Asia\" does NOT include Thailand or Vietnam (both \"Southeast Asia\") or India (\"South Asia\"). " +
+    "So for a Thailand plan use country:\"TH\", or regions:\"Southeast Asia\" for all single-country plans in that area. " +
+    "Regional bundles exist only for the values offered by `regional_region`; \"Southeast Asia\", \"South Asia\" and \"South America\" have single-country plans but no bundles, which is why `regional_region` does not offer them. " +
+    "Results include roamingCountries / roamingCount, the ISO codes a regional bundle actually covers — check these to confirm a bundle includes the countries the user needs. " +
+    "Free — no payment. Returns offer IDs and prices; use them with purchase_esim (requires a self-hosted wallet).",
     {
-      country: z.string().optional().describe("ISO country code for single-country plans, e.g. ES, US, JP. Omit when using regional/regions."),
-      regions: z.enum([
-        "Global", "Africa", "Asia", "Caribbean", "Central America",
-        "Eastern Europe", "Western Europe", "North America", "Oceania",
-        "South America", "South Asia", "Southeast Asia",
-        "Middle East and North Africa",
-      ]).optional().describe("Multi-country region to filter by (exact Zendit enum value)."),
-      regional: z.boolean().optional().describe("true → return ONLY multi-country regional bundles (country is empty). Combine with `regions` to scope to one region."),
+      country: z.string().optional().describe("ISO-2 country code for one specific country, e.g. ES, US, JP."),
+      regions: z.enum(REGION_TAGS).optional().describe("Browse SINGLE-COUNTRY plans by area (exact tag). Partitions, does not nest: Thailand/Vietnam are \"Southeast Asia\", India is \"South Asia\", Japan/Hong Kong are \"Asia\". Do NOT use this to find regional bundles — use regional_region instead."),
+      regional_region: z.enum(REGIONAL_REGIONS).optional().describe("Get MULTI-COUNTRY regional bundles covering this area. Implies regional-only, so `regional` need not be set. Every value offered here has bundles behind it. Takes precedence over `regions`."),
+      regional: z.boolean().optional().describe("true → return ONLY multi-country regional bundles. Use alone to list them all; to scope to one area use regional_region instead."),
       q:       z.string().optional().describe("Free-text filter e.g. \"10GB\", \"unlimited\""),
       limit:   z.number().optional().default(10),
       offset:  z.number().optional().default(0),
     },
-    async ({ country, regions, regional, q, limit, offset }) => {
+    async ({ country, regions, regional_region, regional, q, limit, offset }) => {
+      // regional_region is the regional-mode scope: it implies regional-only and
+      // wins over `regions`, which is the single-country-mode scope.
+      const regionalOnly = regional === true || Boolean(regional_region);
+      const region = regional_region ?? regions;
+
+      // `regional_region` is enum-constrained, but `regional:true` + `regions`
+      // can still express a region that has no bundles (e.g. "Southeast Asia").
+      // Answer with explicit guidance rather than an unexplained empty list —
+      // and never by silently widening the search, which would let the caller
+      // present an unrelated bundle as if it matched the requested area.
+      if (regionalOnly && region && !REGIONAL_REGIONS.includes(region)) {
+        return asText({
+          total: 0,
+          items: [],
+          error: `No multi-country regional bundles exist for "${region}".`,
+          valid_regional_regions: REGIONAL_REGIONS,
+          hint: `"${region}" tags single-country plans only. For regional bundles pass regional_region with one of valid_regional_regions. For single-country plans in this area, pass regions:"${region}" and omit regional.`,
+        });
+      }
+
       const res = await freeApi.get("/esims", {
-        params: { country, regions, regional: regional ? "true" : undefined, q, limit, offset },
+        params: {
+          country,
+          regions:  region,
+          regional: regionalOnly ? "true" : undefined,
+          q, limit, offset,
+        },
       });
       return asText(res.data);
     }
