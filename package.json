@@ -9,6 +9,7 @@
   },
   "files": [
     "bin/",
+    "lib/",
     "index.js",
     "README.md"
   ],

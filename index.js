@@ -24,6 +24,7 @@ import { ExactEvmScheme } from "@x402/evm";
 import { privateKeyToAccount } from "viem/accounts";
 import { z } from "zod";
 import { randomUUID } from "crypto";
+import { normalizeRoamingCountries } from "./lib/countries.js";
 
 // ── Config ────────────────────────────────────────────────────────────────────
 
@@ -73,7 +74,14 @@ function buildPaidClient() {
   });
 }
 
-const asText = (data) => ({ content: [{ type: "text", text: JSON.stringify(data) }] });
+// Every tool result goes out through here, so this is the one place that has
+// to normalize the payload: ISO-2 codes in `roamingCountries` are expanded to
+// full country names (with the raw codes kept as `roamingCountriesCodes`) so a
+// client reading the response can tell what a bundle covers without knowing the
+// code table. Upstream requests and the offer schema are untouched.
+const asText = (data) => ({
+  content: [{ type: "text", text: JSON.stringify(normalizeRoamingCountries(data)) }],
+});
 
 // ── MCP server factory (one per session) ─────────────────────────────────────
 
@@ -182,7 +190,7 @@ function createMcpServer() {
     "IMPORTANT — the region taxonomy PARTITIONS and does NOT nest: \"Asia\" does NOT include Thailand or Vietnam (both \"Southeast Asia\") or India (\"South Asia\"). " +
     "So for a Thailand plan use country:\"TH\", or regions:\"Southeast Asia\" for all single-country plans in that area. " +
     "Regional bundles exist only for the values offered by `regional_region`; \"Southeast Asia\", \"South Asia\" and \"South America\" have single-country plans but no bundles, which is why `regional_region` does not offer them. " +
-    "Results include roamingCountries / roamingCount, the ISO codes a regional bundle actually covers — check these to confirm a bundle includes the countries the user needs. " +
+    "Results include roamingCountries / roamingCount, the countries a regional bundle actually covers — roamingCountries holds full country names (with the raw ISO-2 codes in roamingCountriesCodes); check these to confirm a bundle includes the countries the user needs. " +
     "Free — no payment. Returns offer IDs and prices; use them with purchase_esim (requires a self-hosted wallet).",
     {
       country: z.string().optional().describe("ISO-2 country code for one specific country, e.g. ES, US, JP."),
