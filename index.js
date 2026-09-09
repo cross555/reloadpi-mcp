@@ -83,59 +83,20 @@ const asText = (data) => ({
   content: [{ type: "text", text: JSON.stringify(normalizeRoamingCountries(data)) }],
 });
 
-// ── Regional catalog (fetch-all + cache) ─────────────────────────────────────
-//
-// Upstream ignores `country` whenever regional=true is set, so a bundle can only
-// be matched to a country HERE, against its roamingCountries. That means holding
-// the whole regional set: upstream caps a page at 50 (~7 requests for today's 329
-// bundles), so it is cached rather than refetched per call. The data is small and
-// slow-moving — those 329 bundles collapse to 13 distinct coverage sets.
-//
-// Module scope, not per-session: createMcpServer() runs once per MCP session, and
-// a cache built in there would be thrown away with it.
-
-const REGIONAL_PAGE      = 50;               // upstream's hard page cap
-const REGIONAL_MAX_PAGES = 40;               // stop runaway paging at 2000 bundles
-const REGIONAL_TTL_MS    = 10 * 60 * 1000;
-const REGIONAL_CACHE_MAX = 16;               // bounded: `q` is caller-supplied free text
-
-const regionalCache = new Map();             // key → { at, items }
-
-// Every regional bundle matching `params`, walked page by page. `params` still
-// goes upstream, so label/free-text narrowing stays server-side; only coverage
-// matching happens locally.
-async function fetchAllRegional(params) {
-  const key = JSON.stringify(params);
-  const hit = regionalCache.get(key);
-  if (hit && Date.now() - hit.at < REGIONAL_TTL_MS) return hit.items;
-
-  const items = [];
-  for (let page = 0; page < REGIONAL_MAX_PAGES; page++) {
-    const res = await freeApi.get("/esims", {
-      params: {
-        ...params,
-        regional: "true",
-        limit:    REGIONAL_PAGE,
-        offset:   page * REGIONAL_PAGE,
-      },
-    });
-    const batch = res.data?.items ?? [];
-    items.push(...batch);
-    if (batch.length < REGIONAL_PAGE) break;  // short page → last page
-  }
-
-  regionalCache.set(key, { at: Date.now(), items });
-  // Map iterates in insertion order, so the first key is the oldest entry.
-  if (regionalCache.size > REGIONAL_CACHE_MAX) {
-    regionalCache.delete(regionalCache.keys().next().value);
-  }
-  return items;
-}
+// The /ai browse API caps a page at 50. That is as far as the miss-path probes
+// and the label re-check in the coverage branch can see, so both say only what
+// they can actually confirm rather than extrapolating past it.
+const PROBE_LIMIT = 50;
 
 // Does this bundle actually cover `code` (already trimmed + uppercased)?
-// Tolerant by design: upstream coverage arrays carry the occasional non-ISO
-// value (e.g. "CYP" in the Western Europe set), so nothing here assumes the
-// array is clean — an unrecognised entry simply fails to match.
+//
+// The platform API filters coverage itself now (`covers`, matched against each
+// bundle's roaming list), so this is only used to score near-misses when a
+// coverage search comes back empty. Tolerant by design: coverage arrays carry
+// the occasional non-ISO value (e.g. "CYP" in the Western Europe set), so
+// nothing here assumes the array is clean — an unrecognised entry simply fails
+// to match.
+
 function coversCountry(offer, code) {
   const list = offer?.roamingCountries;
   if (!Array.isArray(list)) return false;
@@ -279,11 +240,12 @@ function createMcpServer() {
       const regionalOnly = regional === true || Boolean(regional_region) || covers.length > 0;
       const region = regional_region ?? regions;
 
-      // Upstream silently ignores `country` whenever regional=true is set: it
-      // returns the ENTIRE regional catalog, which a caller would reasonably
-      // read as "the regional bundles covering this country". Refuse the
-      // combination rather than answer with bundles unrelated to the country —
-      // the same reason the guard below refuses to widen a regional search.
+      // `country` and the regional flags are two different questions: `country`
+      // asks for single-country plans, the regional flags for multi-country
+      // bundles. The platform API would now answer the combination as coverage,
+      // but a caller who wrote both has said two things at once — so name the
+      // one they meant instead of guessing, the same reason the guard below
+      // refuses to widen a regional search.
       if (country && regionalOnly) {
         const flag = covers.length
           ? (covers_countries?.length ? "covers_countries" : "covers_country")
@@ -291,7 +253,7 @@ function createMcpServer() {
         return asText({
           total: 0,
           items: [],
-          error: `country cannot be combined with ${flag} — regional bundles are not filtered by country, so this would return every regional bundle regardless of "${country}".`,
+          error: `country cannot be combined with ${flag} — country selects single-country plans while ${flag} selects multi-country bundles, so the request asks for two different things at once.`,
           hint: covers.length
             ? `${flag} already asks which multi-country bundles cover ${covers.join(", ")} — drop country. For single-country plans instead, pass country:"${country}" alone.`
             : `For single-country plans in ${country}, pass country:"${country}" and omit ${flag}. To find multi-country regional bundles that cover ${country}, use covers_country:"${country}".`,
@@ -316,10 +278,10 @@ function createMcpServer() {
         });
       }
 
-      // Coverage-scoped browse. Upstream cannot answer this — it ignores country
-      // on regional queries — so the regional set is pulled (cached) and matched
-      // locally against roamingCountries. `regions` and `q` still narrow upstream,
-      // so only the coverage test happens here.
+      // Coverage-scoped browse, answered entirely by the platform API: `covers`
+      // matches each bundle's real roaming list, and multiple codes are ANDed
+      // there, so filtering and pagination both happen server-side and `total`
+      // is the true match count.
       //
       // One code path serves covers_country and covers_countries: the singular is
       // just a one-element list. Multiple codes are ANDed — a trip needs ONE
@@ -327,27 +289,52 @@ function createMcpServer() {
       if (covers.length) {
         const names = covers.map(toCountryName);
         const label = names.join(", ");
-        const all   = await fetchAllRegional({ regions: region, q });
 
-        // Score every bundle by how much of the request it covers, so a partial
-        // match can be reported instead of a bare "nothing found".
-        const scored  = all.map((offer) => ({
-          offer,
-          hit: covers.filter((code) => coversCountry(offer, code)),
-        }));
-        const matched = scored.filter((s) => s.hit.length === covers.length).map((s) => s.offer);
+        const res = await freeApi.get("/esims", {
+          params: {
+            covers:   covers.join(","),
+            regions:  region,
+            regional: "true",
+            q, limit, offset,
+          },
+        });
+        const matched = res.data?.items ?? [];
+        const total   = Number(res.data?.total ?? matched.length);
 
-        if (matched.length === 0) {
-          // A label scope is the usual reason for an empty result, so re-check
-          // without it before reporting anything.
-          const wider = region
-            ? (await fetchAllRegional({ q })).filter((offer) =>
-                covers.every((code) => coversCountry(offer, code)))
+        if (total === 0) {
+          // Nothing matched. Ask what each country CAN reach — one request per
+          // code, unscoped — so the reply can say whether the region scope was
+          // the problem and what comes closest. Only on the miss path: the hit
+          // path above is a single request.
+          const probes = await Promise.all(covers.map((code) =>
+            freeApi
+              .get("/esims", { params: { covers: code, regional: "true", q, limit: PROBE_LIMIT } })
+              .then((r) => r.data?.items ?? [])
+          ));
+          const union = new Map();
+          for (const offer of probes.flat()) union.set(offer.offerId, offer);
+
+          // Score every candidate by how much of the request it covers, so a
+          // partial match can be reported instead of a bare "nothing found".
+          const scored = [...union.values()].map((offer) => ({
+            offer,
+            hit: covers.filter((code) => coversCountry(offer, code)),
+          }));
+
+          // A label scope is the usual reason for an empty result: these probes
+          // carry no region scope, so anything covering every code here was
+          // excluded by `regions`/`regional_region` alone.
+          const widerLabels = region
+            ? [...new Set(
+                scored
+                  .filter((s) => s.hit.length === covers.length)
+                  .flatMap((s) => s.offer.regions ?? [])
+              )]
             : [];
-          const widerLabels = [...new Set(wider.flatMap((offer) => offer.regions ?? []))];
 
-          // Otherwise show what comes closest. 329 bundles collapse to 13 coverage
-          // sets, so dedupe by set — five plans from one bundle family is noise.
+          // Otherwise show what comes closest. Bundles collapse to a handful of
+          // coverage sets, so dedupe by set — five plans from one bundle family
+          // is noise.
           const seen    = new Set();
           const closest = scored
             .filter((s) => s.hit.length > 0)
@@ -386,23 +373,35 @@ function createMcpServer() {
           });
         }
 
-        // Paginate locally: `total` counts what actually matched, not upstream's
-        // unfiltered regional count.
-        const labels = [...new Set(matched.flatMap((offer) => offer.regions ?? []))];
+        // `covered_by_regions` describes the WHOLE match, not this page, so it
+        // is only reported when the page holds every match — one extra request
+        // when it does not, and nothing claimed when even that cannot see them
+        // all. A page-scoped label list would read as the complete answer.
+        let labels = [...new Set(matched.flatMap((offer) => offer.regions ?? []))];
+        let labelsComplete = matched.length === total;
+        if (!labelsComplete && total <= PROBE_LIMIT) {
+          const full = await freeApi.get("/esims", {
+            params: { covers: covers.join(","), regions: region, regional: "true", q, limit: PROBE_LIMIT },
+          });
+          labels = [...new Set((full.data?.items ?? []).flatMap((offer) => offer.regions ?? []))];
+          labelsComplete = true;
+        }
+
         return asText({
-          total: matched.length,
-          items: matched.slice(offset, offset + limit),
+          total,
+          items: matched,
           matched_on: "roamingCountries",
           requested_countries: names,
-          covered_by_regions: labels,
+          ...(labelsComplete ? { covered_by_regions: labels } : {}),
           // Worth spelling out when there is only one tag: "Global" is the sole
           // tag covering Japan, India and China, which reads like a glitch
           // otherwise.
-          ...(labels.length === 1
+          ...(labelsComplete && labels.length === 1
             ? { note: `Every regional bundle covering ${label} is tagged "${labels[0]}" — no narrower regional bundle includes ${covers.length > 1 ? "them all" : "it"}.` }
             : {}),
         });
       }
+
 
       const res = await freeApi.get("/esims", {
         params: {
