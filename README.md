@@ -28,6 +28,25 @@ with `EVM_PRIVATE_KEY`** — they settle x402 payments from your own wallet.
 > holds, for anyone who connects. Public hosting (like `mcp.reloadpi.com`) must run **without** a
 > key — browse-only. Keys belong only on a machine you control.
 
+### Finding an eSIM that covers a country
+
+`browse_esim_offers` keeps *single-country plans* and *multi-country regional bundles* apart, because
+a bundle's region tag says how the provider filed it, not what it covers — the "Asia" bundle covers
+AU, NZ and UZ but not Japan, India or China, which only "Global" bundles reach.
+
+| Filter | Returns |
+|--------|---------|
+| `country` | Single-country plans for one country (ISO-2, e.g. `JP`) |
+| `regions` | Single-country plans grouped by area. The tags partition and do not nest: Thailand is `Southeast Asia`, India is `South Asia`, Japan is `Asia` |
+| `regional_region` | Multi-country bundles tagged for an area |
+| `covers_country` | Multi-country bundles that **actually** cover a country |
+| `covers_countries` | One bundle covering **every** country in a list — `["BR","AR","CL"]` for a multi-stop trip |
+
+When someone names a country, reach for `country` or `covers_country`, never `regional_region`.
+Coverage is matched against each bundle's real roaming list by the platform API, so results are paged
+server-side and `total` is the true match count. If no single bundle covers everything asked for, the
+reply lists the closest bundles and what each one misses.
+
 ---
 
 ## Connecting
@@ -98,6 +117,8 @@ RELOADPI_AI_BASE=https://api.reloadpi.com/ai             # optional — free bro
 PORT=3100                                                # optional
 MCP_AUTH_TOKEN=                                          # optional — Bearer gate on /mcp
 ```
+
+`RELOADPI_AI_BASE` must point at an API that supports the `covers` coverage filter (`api.reloadpi.com` does) — without it, coverage searches come back unfiltered.
 
 You need USDC on Base mainnet. Get it at [Coinbase](https://coinbase.com) or bridge from another chain.
 
