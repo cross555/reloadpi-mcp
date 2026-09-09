@@ -24,7 +24,7 @@ import { ExactEvmScheme } from "@x402/evm";
 import { privateKeyToAccount } from "viem/accounts";
 import { z } from "zod";
 import { randomUUID } from "crypto";
-import { normalizeRoamingCountries } from "./lib/countries.js";
+import { normalizeRoamingCountries, toCountryName } from "./lib/countries.js";
 
 // ── Config ────────────────────────────────────────────────────────────────────
 
@@ -82,6 +82,65 @@ function buildPaidClient() {
 const asText = (data) => ({
   content: [{ type: "text", text: JSON.stringify(normalizeRoamingCountries(data)) }],
 });
+
+// ── Regional catalog (fetch-all + cache) ─────────────────────────────────────
+//
+// Upstream ignores `country` whenever regional=true is set, so a bundle can only
+// be matched to a country HERE, against its roamingCountries. That means holding
+// the whole regional set: upstream caps a page at 50 (~7 requests for today's 329
+// bundles), so it is cached rather than refetched per call. The data is small and
+// slow-moving — those 329 bundles collapse to 13 distinct coverage sets.
+//
+// Module scope, not per-session: createMcpServer() runs once per MCP session, and
+// a cache built in there would be thrown away with it.
+
+const REGIONAL_PAGE      = 50;               // upstream's hard page cap
+const REGIONAL_MAX_PAGES = 40;               // stop runaway paging at 2000 bundles
+const REGIONAL_TTL_MS    = 10 * 60 * 1000;
+const REGIONAL_CACHE_MAX = 16;               // bounded: `q` is caller-supplied free text
+
+const regionalCache = new Map();             // key → { at, items }
+
+// Every regional bundle matching `params`, walked page by page. `params` still
+// goes upstream, so label/free-text narrowing stays server-side; only coverage
+// matching happens locally.
+async function fetchAllRegional(params) {
+  const key = JSON.stringify(params);
+  const hit = regionalCache.get(key);
+  if (hit && Date.now() - hit.at < REGIONAL_TTL_MS) return hit.items;
+
+  const items = [];
+  for (let page = 0; page < REGIONAL_MAX_PAGES; page++) {
+    const res = await freeApi.get("/esims", {
+      params: {
+        ...params,
+        regional: "true",
+        limit:    REGIONAL_PAGE,
+        offset:   page * REGIONAL_PAGE,
+      },
+    });
+    const batch = res.data?.items ?? [];
+    items.push(...batch);
+    if (batch.length < REGIONAL_PAGE) break;  // short page → last page
+  }
+
+  regionalCache.set(key, { at: Date.now(), items });
+  // Map iterates in insertion order, so the first key is the oldest entry.
+  if (regionalCache.size > REGIONAL_CACHE_MAX) {
+    regionalCache.delete(regionalCache.keys().next().value);
+  }
+  return items;
+}
+
+// Does this bundle actually cover `code` (already trimmed + uppercased)?
+// Tolerant by design: upstream coverage arrays carry the occasional non-ISO
+// value (e.g. "CYP" in the Western Europe set), so nothing here assumes the
+// array is clean — an unrecognised entry simply fails to match.
+function coversCountry(offer, code) {
+  const list = offer?.roamingCountries;
+  if (!Array.isArray(list)) return false;
+  return list.some((c) => typeof c === "string" && c.trim().toUpperCase() === code);
+}
 
 // ── MCP server factory (one per session) ─────────────────────────────────────
 
@@ -187,6 +246,8 @@ function createMcpServer() {
     "`regions` to browse SINGLE-COUNTRY plans grouped by area; " +
     "`regional_region` to get MULTI-COUNTRY regional bundles covering an area (this already implies regional-only — do not also set `regional`); " +
     "`regional:true` on its own to list every regional bundle. " +
+    "`covers_country` (ISO-2) to find the multi-country bundles that ACTUALLY cover a country. " +
+    "COVERAGE IS NOT THE LABEL: a bundle's `regions` tag describes how the provider filed it, not what it covers — the \"Asia\" bundle covers AU, NZ and UZ but NOT Japan, India or China, which are covered only by \"Global\" bundles. So when the user names a country, use `country` (single-country plans) or `covers_country` (bundles covering it), never `regional_region`. " +
     "IMPORTANT — the region taxonomy PARTITIONS and does NOT nest: \"Asia\" does NOT include Thailand or Vietnam (both \"Southeast Asia\") or India (\"South Asia\"). " +
     "So for a Thailand plan use country:\"TH\", or regions:\"Southeast Asia\" for all single-country plans in that area. " +
     "Regional bundles exist only for the values offered by `regional_region`; \"Southeast Asia\", \"South Asia\" and \"South America\" have single-country plans but no bundles, which is why `regional_region` does not offer them. " +
@@ -194,18 +255,38 @@ function createMcpServer() {
     "Free — no payment. Returns offer IDs and prices; use them with purchase_esim (requires a self-hosted wallet).",
     {
       country: z.string().optional().describe("ISO-2 country code for one specific country, e.g. ES, US, JP."),
-      regions: z.enum(REGION_TAGS).optional().describe("Browse SINGLE-COUNTRY plans by area (exact tag). Partitions, does not nest: Thailand/Vietnam are \"Southeast Asia\", India is \"South Asia\", Japan/Hong Kong are \"Asia\". Do NOT use this to find regional bundles — use regional_region instead."),
+      regions: z.enum(REGION_TAGS).optional().describe("Browse SINGLE-COUNTRY plans by area (exact tag). Partitions, does not nest: Thailand/Vietnam are \"Southeast Asia\", India is \"South Asia\", Japan/Hong Kong are \"Asia\". Do NOT use this to find regional bundles — use regional_region instead. These tags apply to single-country plans only: the single-country \"Asia\" tag covers JP and CN, but the multi-country regional_region:\"Asia\" bundle does NOT include them, so for a bundle that actually covers a given country use `covers_country`."),
       regional_region: z.enum(REGIONAL_REGIONS).optional().describe("Get MULTI-COUNTRY regional bundles covering this area. Implies regional-only, so `regional` need not be set. Every value offered here has bundles behind it. Takes precedence over `regions`."),
       regional: z.boolean().optional().describe("true → return ONLY multi-country regional bundles. Use alone to list them all; to scope to one area use regional_region instead."),
+      covers_country: z.string().optional().describe("ISO-2 code of a country the bundle must ACTUALLY cover, e.g. JP. USE THIS, NOT `regional_region`, whenever the user names a country. `regional_region` filters on the provider's region LABEL, which does not describe coverage and is frequently wrong: regional_region:\"Asia\" returns bundles covering Australia, New Zealand and Uzbekistan while MISSING Japan, India and China. This parameter instead matches each bundle's real roamingCountries list. Expect JP, IN and CN to come back tagged \"Global\" — they are covered by no other bundle, so a \"Global\" result is correct, not a fallback. Returns multi-country bundles only: if the user just wants a plan for that one country, use `country` (more plans, usually cheaper). Implies regional-only. Cannot be combined with `country`."),
       q:       z.string().optional().describe("Free-text filter e.g. \"10GB\", \"unlimited\""),
       limit:   z.number().optional().default(10),
       offset:  z.number().optional().default(0),
     },
-    async ({ country, regions, regional_region, regional, q, limit, offset }) => {
-      // regional_region is the regional-mode scope: it implies regional-only and
-      // wins over `regions`, which is the single-country-mode scope.
-      const regionalOnly = regional === true || Boolean(regional_region);
+    async ({ country, regions, regional_region, regional, covers_country, q, limit, offset }) => {
+      // Two scopes imply regional-only: regional_region (scoped by the provider's
+      // label) and covers_country (scoped by what a bundle actually covers).
+      // `regions` stays the single-country scope, and regional_region wins over it.
+      const covers = covers_country?.trim().toUpperCase() || undefined;
+      const regionalOnly = regional === true || Boolean(regional_region) || Boolean(covers);
       const region = regional_region ?? regions;
+
+      // Upstream silently ignores `country` whenever regional=true is set: it
+      // returns the ENTIRE regional catalog, which a caller would reasonably
+      // read as "the regional bundles covering this country". Refuse the
+      // combination rather than answer with bundles unrelated to the country —
+      // the same reason the guard below refuses to widen a regional search.
+      if (country && regionalOnly) {
+        const flag = covers ? "covers_country" : regional_region ? "regional_region" : "regional:true";
+        return asText({
+          total: 0,
+          items: [],
+          error: `country cannot be combined with ${flag} — regional bundles are not filtered by country, so this would return every regional bundle regardless of "${country}".`,
+          hint: covers
+            ? `covers_country:"${covers}" already asks which multi-country bundles cover that country — drop country. For single-country plans instead, pass country:"${country}" alone.`
+            : `For single-country plans in ${country}, pass country:"${country}" and omit ${flag}. To find multi-country regional bundles that cover ${country}, use covers_country:"${country}".`,
+        });
+      }
 
       // `regional_region` is enum-constrained, but `regional:true` + `regions`
       // can still express a region that has no bundles (e.g. "Southeast Asia").
@@ -219,6 +300,53 @@ function createMcpServer() {
           error: `No multi-country regional bundles exist for "${region}".`,
           valid_regional_regions: REGIONAL_REGIONS,
           hint: `"${region}" tags single-country plans only. For regional bundles pass regional_region with one of valid_regional_regions. For single-country plans in this area, pass regions:"${region}" and omit regional.`,
+        });
+      }
+
+      // Coverage-scoped browse. Upstream cannot answer this — it ignores country
+      // on regional queries — so the regional set is pulled (cached) and matched
+      // locally against roamingCountries. `regions` and `q` still narrow upstream,
+      // so only the coverage test happens here.
+      if (covers) {
+        const name    = toCountryName(covers);
+        const all     = await fetchAllRegional({ regions: region, q });
+        const matched = all.filter((offer) => coversCountry(offer, covers));
+
+        if (matched.length === 0) {
+          // An empty page here usually means the label scope was wrong, not that
+          // no bundle exists — so say where the country IS covered instead of
+          // returning a bare empty list.
+          const wider  = region
+            ? (await fetchAllRegional({ q })).filter((offer) => coversCountry(offer, covers))
+            : [];
+          const labels = [...new Set(wider.flatMap((offer) => offer.regions ?? []))];
+          return asText({
+            total: 0,
+            items: [],
+            error: region
+              ? `No "${region}" bundle covers ${name}.`
+              : `No multi-country regional bundle covers ${name}.`,
+            ...(labels.length ? { covered_by_regions: labels } : {}),
+            hint: labels.length
+              ? `${name} is covered by bundles tagged ${labels.map((l) => `"${l}"`).join(", ")}. Drop regions/regional_region and pass covers_country:"${covers}" alone to see them.`
+              : `Nothing in the regional catalog covers ${name}. For a single-country plan there, pass country:"${covers}" on its own.`,
+          });
+        }
+
+        // Paginate locally: `total` counts what actually matched, not upstream's
+        // unfiltered regional count.
+        const labels = [...new Set(matched.flatMap((offer) => offer.regions ?? []))];
+        return asText({
+          total: matched.length,
+          items: matched.slice(offset, offset + limit),
+          matched_on: "roamingCountries",
+          covered_by_regions: labels,
+          // Worth spelling out when there is only one tag: "Global" is the sole
+          // tag covering Japan, India and China, which reads like a glitch
+          // otherwise.
+          ...(labels.length === 1
+            ? { note: `Every regional bundle covering ${name} is tagged "${labels[0]}" — no narrower regional bundle includes it.` }
+            : {}),
         });
       }
 
