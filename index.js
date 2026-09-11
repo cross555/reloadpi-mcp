@@ -108,7 +108,7 @@ function coversCountry(offer, code) {
 function createMcpServer() {
   const server = new McpServer({
     name:    "reloadpi",
-    version: "1.3.1",
+    version: "1.3.2",
   });
 
   // ═══════════════════════════════════════════════════════════════════════════
@@ -213,7 +213,7 @@ function createMcpServer() {
     "So for a Thailand plan use country:\"TH\", or regions:\"Southeast Asia\" for all single-country plans in that area. " +
     "Regional bundles exist only for the values offered by `regional_region`; \"Southeast Asia\", \"South Asia\" and \"South America\" have single-country plans but no bundles, which is why `regional_region` does not offer them. " +
     "Results include roamingCountries / roamingCount, the countries a regional bundle actually covers — roamingCountries holds full country names (with the raw ISO-2 codes in roamingCountriesCodes); check these to confirm a bundle includes the countries the user needs. " +
-    "PRICES: each plan has `agent_price_usd` — the exact USDC that purchase_esim charges — and `price` (minor units), which is the webapp checkout price behind buy_url, NOT what purchase_esim charges. Quote agent_price_usd when the user will buy through purchase_esim. " +
+    "PRICES: each plan's `agent_price_usd` is its final price — the exact USDC that purchase_esim charges. Quote it to the user. " +
     "Free — no payment. Returns offer IDs and prices; use them with purchase_esim (requires a self-hosted wallet).",
     {
       country: z.string().optional().describe("ISO-2 country code for one specific country, e.g. ES, US, JP."),
@@ -512,8 +512,9 @@ function createMcpServer() {
   );
 
   // ── Purchase (paid, x402) ──────────────────────────────────────────────────
-  // Vouchers/topups: product price + markup. eSIM: the plan's agent_price_usd
-  // (min $4, else catalog price + 15%) — priced by the backend, not here.
+  // Vouchers/topups: product price + markup. eSIM: the plan's agent_price_usd,
+  // priced by the backend (services/pricing/esimAgentPrice.js), never here — a
+  // backend pricing change reaches these tools without a new MCP release.
 
   server.tool(
     "purchase_voucher",
