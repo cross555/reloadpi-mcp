@@ -108,7 +108,7 @@ function coversCountry(offer, code) {
 function createMcpServer() {
   const server = new McpServer({
     name:    "reloadpi",
-    version: "1.3.0",
+    version: "1.3.1",
   });
 
   // ═══════════════════════════════════════════════════════════════════════════
@@ -213,6 +213,7 @@ function createMcpServer() {
     "So for a Thailand plan use country:\"TH\", or regions:\"Southeast Asia\" for all single-country plans in that area. " +
     "Regional bundles exist only for the values offered by `regional_region`; \"Southeast Asia\", \"South Asia\" and \"South America\" have single-country plans but no bundles, which is why `regional_region` does not offer them. " +
     "Results include roamingCountries / roamingCount, the countries a regional bundle actually covers — roamingCountries holds full country names (with the raw ISO-2 codes in roamingCountriesCodes); check these to confirm a bundle includes the countries the user needs. " +
+    "PRICES: each plan has `agent_price_usd` — the exact USDC that purchase_esim charges — and `price` (minor units), which is the webapp checkout price behind buy_url, NOT what purchase_esim charges. Quote agent_price_usd when the user will buy through purchase_esim. " +
     "Free — no payment. Returns offer IDs and prices; use them with purchase_esim (requires a self-hosted wallet).",
     {
       country: z.string().optional().describe("ISO-2 country code for one specific country, e.g. ES, US, JP."),
@@ -499,7 +500,7 @@ function createMcpServer() {
 
   server.tool(
     "get_esim_offer",
-    "Get full details for a specific eSIM plan by ID — exact price, data allowance, duration, coverage countries, and whether data is unlimited. Costs a small x402 fee from your wallet.",
+    "Get full details for a specific eSIM plan by ID — exact price, data allowance, duration, coverage countries, and whether data is unlimited. `price` here (minor units, divide by priceCurrencyDivisor) is the exact USDC amount purchase_esim charges — the same as agent_price_usd in browse_esim_offers. Costs a small x402 fee from your wallet.",
     {
       offerId: z.string().describe("eSIM offer ID e.g. ESIM-ES-7D-10GB-NOROAM"),
     },
@@ -510,7 +511,9 @@ function createMcpServer() {
     }
   );
 
-  // ── Purchase (paid — product price + markup, x402) ─────────────────────────
+  // ── Purchase (paid, x402) ──────────────────────────────────────────────────
+  // Vouchers/topups: product price + markup. eSIM: the plan's agent_price_usd
+  // (min $4, else catalog price + 15%) — priced by the backend, not here.
 
   server.tool(
     "purchase_voucher",
@@ -561,7 +564,7 @@ function createMcpServer() {
 
   server.tool(
     "purchase_esim",
-    "Purchase an eSIM data plan. The x402 payment (USDC on Base) settles automatically from YOUR wallet. Provide offerId from browse_esim_offers. Returns orderId, txHash, ICCID and QR code (base64 PNG) when ready. If QR is not immediately available, poll get_order with the returned orderId.",
+    "Purchase an eSIM data plan. The x402 payment (USDC on Base) settles automatically from YOUR wallet and is exactly the plan's agent_price_usd from browse_esim_offers (the `price` from get_esim_offer). Provide offerId from browse_esim_offers. Returns orderId, txHash, ICCID and QR code (base64 PNG) when ready. If QR is not immediately available, poll get_order with the returned orderId.",
     {
       offerId: z.string().describe("eSIM offer ID from browse_esim_offers"),
       iccid:   z.string().optional().describe("Existing ICCID — only for top-up/recharge of an installed eSIM"),
